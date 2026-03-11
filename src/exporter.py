@@ -18,6 +18,7 @@ class Exporter:
             "business_name", 
             "ceo_name",
             "emails",
+            "icebreaker",
             "confidence_score",
             "website_status",
             "phone", 

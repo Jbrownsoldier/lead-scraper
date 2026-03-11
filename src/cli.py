@@ -11,6 +11,7 @@ from scorer import Scorer
 from exporter import Exporter
 from enrichment import EnrichmentModule
 from deduplicator import Deduplicator
+from personalizer import Personalizer
 
 import aiohttp
 
@@ -29,8 +30,9 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
     validator = Validator()
     scorer = Scorer()
     enricher = EnrichmentModule()
+    personalizer = Personalizer()
     exporter = Exporter()
-
+    
     # 3. Step 1: Discover Leads
     print(f"\n--- Phase 1: Discovering Leads for '{query}' ---")
     
@@ -83,12 +85,13 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
         for i, lead in enumerate(target_leads):
             target_leads[i] = scorer.score_lead(lead)
     else:
-        # We apply synchronous enrichment (to prevent DuckDuckGo rate limiting) and then scoring
+        # We apply synchronous enrichment and scoring, then generate icebreaker
         for i, lead in enumerate(target_leads):
             target_leads[i] = enricher.enrich_lead(lead)
             target_leads[i] = scorer.score_lead(target_leads[i])
+            target_leads[i]["icebreaker"] = personalizer.generate_icebreaker(target_leads[i])
         
-    print("[*] Enrichment and Scoring complete.")
+    print("[*] Enrichment, Scoring, and Personalization complete.")
 
     # 6. Step 5: Export to CSV
     print(f"\n--- Phase 4: Exporting Results ---")

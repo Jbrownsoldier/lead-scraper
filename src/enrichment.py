@@ -1,7 +1,7 @@
-from duckduckgo_search import DDGS
 import re
-from typing import Dict, Any
 import time
+from typing import Dict, Any
+from duckduckgo_search import DDGS
 
 class EnrichmentModule:
     def __init__(self):
@@ -11,7 +11,6 @@ class EnrichmentModule:
     def enrich_lead(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """
         Takes a lead dictionary and uses DuckDuckGo to search for emails, social links, and CEO/Owner names.
-        Modifies the dictionary in-place and returns it.
         """
         business_name = lead.get("business_name", "")
         address = lead.get("address", "")
@@ -21,17 +20,17 @@ class EnrichmentModule:
         lead["social_links"] = ""
         lead["ceo_name"] = ""
         
-        # Small sanity check to ensure we have a measurable business
         if not business_name or business_name == "Unknown":
             return lead
             
         print(f"  [~] Scrubbing public records for: {business_name}...")
         
-        query = f'"{business_name}" {address} owner OR ceo OR founder email'
-        
         emails = set()
         socials = set()
         ceo_name = "Not Found"
+
+        # Free Tier: DuckDuckGo scraping
+        query = f'"{business_name}" {address} owner OR ceo OR founder email'
         
         def process_results(results_list):
             nonlocal ceo_name, emails, socials
@@ -88,9 +87,12 @@ class EnrichmentModule:
         # Prevent duplicating the main website as a social link
         website_url = lead.get("website", "")
         if website_url:
-            socials = {s for s in socials if s.lower() != website_url.lower()}
+            social_list = list(socials)
+            social_list = [s for s in social_list if s.lower().rstrip('/') != website_url.lower().rstrip('/')]
+            lead["social_links"] = ", ".join(social_list)
+        else:
+            lead["social_links"] = ", ".join(socials) if socials else ""
             
-        lead["social_links"] = ", ".join(socials) if socials else ""
         lead["ceo_name"] = ceo_name if ceo_name != "Not Found" else ""
         
         return lead
