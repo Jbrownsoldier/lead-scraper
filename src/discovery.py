@@ -9,6 +9,7 @@ class GooglePlacesDiscovery:
         self.api_key = api_key
         # Using the New Places API (Text Search)
         self.text_search_url = "https://places.googleapis.com/v1/places:searchText"
+        self.api_calls = 0
 
     async def _fetch_page(self, session: aiohttp.ClientSession, query: str, page_token: str = None) -> Dict[str, Any]:
         headers = {
@@ -26,6 +27,7 @@ class GooglePlacesDiscovery:
             payload["pageToken"] = page_token
 
         async with session.post(self.text_search_url, headers=headers, json=payload) as response:
+            self.api_calls += 1
             if response.status != 200:
                 print(f"Error fetching data from Google Places: {response.status}")
                 text = await response.text()
@@ -34,27 +36,27 @@ class GooglePlacesDiscovery:
             
             return await response.json()
 
-    async def search_leads(self, query: str, max_results: int = 50) -> List[Dict[str, Any]]:
+    async def fetch_leads_generator(self, query: str):
         """
         Searches Google Places API for leads matching the query.
-        Handles pagination up to max_results.
+        Yields chunks of leads so the caller can stop once enough are found.
         """
         if not self.api_key:
             print("Error: GOOGLE_PLACES_API_KEY is not set.")
             sys.exit(1)
 
         print(f"[*] Discovering leads for query: '{query}'...")
-        all_places = []
         page_token = None
         
         async with aiohttp.ClientSession() as session:
-            while len(all_places) < max_results:
+            while True:
                 data = await self._fetch_page(session, query, page_token)
                 
                 places = data.get("places", [])
                 if not places:
                     break
                     
+                page_leads = []
                 for place in places:
                     # Map new API fields to manageable dictionary
                     lead = {
@@ -64,10 +66,9 @@ class GooglePlacesDiscovery:
                         "website": place.get("websiteUri", ""),
                         "maps_status": place.get("businessStatus", "UNKNOWN")
                     }
-                    all_places.append(lead)
-                    
-                    if len(all_places) >= max_results:
-                        break
+                    page_leads.append(lead)
+                
+                yield page_leads
                 
                 page_token = data.get("nextPageToken")
                 if not page_token:
@@ -75,9 +76,6 @@ class GooglePlacesDiscovery:
                     
                 # Small delay to respect API rate limits
                 await asyncio.sleep(1)
-
-        print(f"[*] Discovery complete. Found {len(all_places)} initial records.")
-        return all_places
 
 # Quick test execution block
 if __name__ == "__main__":

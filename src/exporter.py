@@ -1,10 +1,11 @@
+import os
 import pandas as pd
 from typing import List, Dict, Any
 
 class Exporter:
     def export_to_csv(self, leads: List[Dict[str, Any]], filename: str = "leads.csv"):
         """
-        Exports the finalized leads to a CSV file.
+        Exports the finalized leads to a CSV file. Appends if file exists.
         """
         if not leads:
             print("[!] No actionable leads found to export.")
@@ -31,5 +32,7 @@ class Exporter:
         cols = [col for col in expected_columns if col in df.columns]
         
         df = df[cols]
-        df.to_csv(filename, index=False)
-        print(f"[*] Successfully exported {len(leads)} leads to {filename}")
+        # Append if exists, otherwise write new with header
+        file_exists = os.path.isfile(filename)
+        df.to_csv(filename, mode='a', index=False, header=not file_exists)
+        print(f"[*] Successfully exported {len(leads)} leads to {filename} (Appended)")

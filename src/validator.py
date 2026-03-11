@@ -65,17 +65,24 @@ class Validator:
             }
             
             async def fetch_url(target_url):
-                async with session.get(target_url, headers=headers, timeout=12, allow_redirects=True, ssl=False) as response:
-                    final_url = str(response.url).lower()
-                    status = response.status
-                    html = ""
-                    # If it's a success or a WAF block, try to grab the HTML
-                    if status < 400 or status in [403, 406]:
-                        try:
-                            html = await response.text()
-                        except:
-                            pass
-                    return status, final_url, html
+                max_retries = 2
+                for attempt in range(max_retries):
+                    try:
+                        async with session.get(target_url, headers=headers, timeout=12, allow_redirects=True, ssl=False) as response:
+                            final_url = str(response.url).lower()
+                            status = response.status
+                            html = ""
+                            # If it's a success or a WAF block, try to grab the HTML
+                            if status < 400 or status in [403, 406]:
+                                try:
+                                    html = await response.text()
+                                except:
+                                    pass
+                            return status, final_url, html
+                    except (asyncio.TimeoutError, aiohttp.ClientError):
+                        if attempt == max_retries - 1:
+                            raise
+                        await asyncio.sleep(2)
 
             try:
                 # First attempt: Clean URL (no UTM params)

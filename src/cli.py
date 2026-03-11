@@ -33,45 +33,47 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
 
     # 3. Step 1: Discover Leads
     print(f"\n--- Phase 1: Discovering Leads for '{query}' ---")
-    raw_leads = await discovery.search_leads(query, max_results=max_results)
     
-    if not raw_leads:
-        print("[!] No leads found. Exiting.")
-        return
-
-    # 3.5 Deduplication
+    target_leads = []
     deduplicator = Deduplicator(storage_file="seen_leads.json")
-    original_count = len(raw_leads)
-    raw_leads = deduplicator.filter_and_record_new_leads(raw_leads)
     
-    if len(raw_leads) < original_count:
-        print(f"[*] Deduped {original_count - len(raw_leads)} leads that were already processed previously.")
-
-    if not raw_leads:
-        print("[!] All discovered leads have been previously processed. No new leads found. Exiting.")
-        return
-
-    # 4. Step 2 & 3: Validate Websites and Score
-    print(f"\n--- Phase 2: Validating Websites and Scoring ({len(raw_leads)} leads) ---")
-    
-    async with aiohttp.ClientSession() as session:
-        # Create validation tasks
-        tasks = [validator.validate_website(lead, session) for lead in raw_leads]
+    async for raw_leads_chunk in discovery.fetch_leads_generator(query):
+        original_count = len(raw_leads_chunk)
+        new_leads_chunk = deduplicator.filter_and_record_new_leads(raw_leads_chunk)
         
-        # Run validations concurrently
-        validated_leads = await asyncio.gather(*tasks)
+        if len(new_leads_chunk) < original_count:
+            print(f"[*] Deduped {original_count - len(new_leads_chunk)} leads in this chunk that were already processed previously.")
+            
+        if not new_leads_chunk:
+            continue
+            
+        print(f"\n--- Phase 2: Validating Websites and Scoring ({len(new_leads_chunk)} leads) ---")
+        async with aiohttp.ClientSession() as session:
+            tasks = [validator.validate_website(lead, session) for lead in new_leads_chunk]
+            validated_chunk = await asyncio.gather(*tasks)
+            
+        actionable_chunk = [
+            lead for lead in validated_chunk 
+            if lead.get("website_status") and "FILTER OUT" not in lead.get("website_status")
+        ]
         
-    print("[*] Validation complete.")
+        if actionable_chunk:
+            target_leads.extend(actionable_chunk)
+            print(f"[*] Found {len(actionable_chunk)} actionable leads in this chunk. Total actionable so far: {len(target_leads)} / {max_results}")
+        else:
+            print(f"[*] No actionable leads in this chunk.")
+            
+        if len(target_leads) >= max_results:
+            print(f"\n[*] Reached goal of {max_results} actionable leads. Stopping API calls to save money.")
+            target_leads = target_leads[:max_results]
+            break
 
-    # 5. Step 4: Filter strictly before enrichment (saves time and requests)
-    # We only want to enrich businesses that are actually good leads (no real website)
-    target_leads = [
-        lead for lead in validated_leads 
-        if lead.get("website_status") and "FILTER OUT" not in lead.get("website_status")
-    ]
-    
     if not target_leads:
         print("\n[!] No actionable leads found after filtering valid websites. Exiting.")
+        cost = discovery.api_calls * 0.032
+        print(f"\n--- Run Summary ---")
+        print(f"[*] API Calls Made: {discovery.api_calls}")
+        print(f"[*] Estimated Google Places API Cost: ${cost:.3f} USD\n")
         return
         
     print(f"\n--- Phase 3: Scoring and Enriching ({len(target_leads)} refined leads) ---")
@@ -81,10 +83,10 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
         for i, lead in enumerate(target_leads):
             target_leads[i] = scorer.score_lead(lead)
     else:
-        # We apply scoring and then synchronous enrichment (to prevent DuckDuckGo rate limiting)
+        # We apply synchronous enrichment (to prevent DuckDuckGo rate limiting) and then scoring
         for i, lead in enumerate(target_leads):
-            target_leads[i] = scorer.score_lead(lead)
-            target_leads[i] = enricher.enrich_lead(target_leads[i])
+            target_leads[i] = enricher.enrich_lead(lead)
+            target_leads[i] = scorer.score_lead(target_leads[i])
         
     print("[*] Enrichment and Scoring complete.")
 
@@ -92,6 +94,10 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
     print(f"\n--- Phase 4: Exporting Results ---")
     
     exporter.export_to_csv(target_leads, filename=output_file)
+    cost = discovery.api_calls * 0.032
+    print(f"\n--- Run Summary ---")
+    print(f"[*] API Calls Made: {discovery.api_calls}")
+    print(f"[*] Estimated Google Places API Cost: ${cost:.3f} USD")
     print("\n[+] Process finished successfully!\n")
 
 def main():

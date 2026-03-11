@@ -33,7 +33,9 @@ class Scorer:
             score += 1 # Okay target, but could indicate business closure
             
         # Assign High/Medium/Low based on accumulated score
-        if score >= 8:
+        has_enrichment = bool(lead.get("emails") or lead.get("ceo_name"))
+        
+        if score >= 8 and has_enrichment:
             lead["confidence_score"] = "High"
         elif score >= 5:
             lead["confidence_score"] = "Medium"
