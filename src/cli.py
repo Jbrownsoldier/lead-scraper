@@ -25,6 +25,14 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
         print("[!] Please add it and try again.")
         sys.exit(1)
 
+    # 1.5 Setup Scraped-Leads directory
+    output_dir = "Scraped-Leads"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Ensure output_file goes into the directory if not specifically path'd
+    if not os.path.dirname(output_file):
+        output_file = os.path.join(output_dir, output_file)
+
     # 2. Initialize Engines
     discovery = GooglePlacesDiscovery(api_key)
     validator = Validator()
@@ -37,7 +45,7 @@ async def run_scraper(query: str, max_results: int, output_file: str, skip_enric
     print(f"\n--- Phase 1: Discovering Leads for '{query}' ---")
     
     target_leads = []
-    deduplicator = Deduplicator(storage_file="seen_leads.json")
+    deduplicator = Deduplicator(storage_file=os.path.join(output_dir, "seen_leads.json"))
     
     async for raw_leads_chunk in discovery.fetch_leads_generator(query):
         original_count = len(raw_leads_chunk)
@@ -121,7 +129,7 @@ def main():
         "-o", "--output", 
         type=str, 
         default="leads_output.csv", 
-        help="Output CSV filename (default: leads_output.csv)"
+        help="Output CSV filename (will be saved in Scraped-Leads/ folder) (default: leads_output.csv)"
     )
     parser.add_argument(
         "--skip-enrichment",
