@@ -47,38 +47,77 @@ class Validator:
 
         # 3. Test the Real Website
         try:
-            # Setup a browser-like user agent to avoid bot-blocks
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(url)
+            # Remove tracking query parameters cleanly
+            clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, '', parsed.fragment))
+            base_url = f"{parsed.scheme}://{parsed.netloc}/"
+
+            # Setup realistic browser headers to avoid Cloudflare/Wordfence blocks
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Upgrade-Insecure-Requests": "1"
+            }
             
-            # Using a short timeout (10 seconds)
-            async with session.get(url, headers=headers, timeout=10, allow_redirects=True, ssl=False) as response:
-                final_url = str(response.url).lower()
-                
-                # Check for redirects to social media
-                if any(domain in final_url for domain in self.social_domains):
-                    lead["website_status"] = "Social-Only"
-                    lead["validation_notes"] = f"Redirected to social profile: {final_url}"
-                    return lead
+            async def fetch_url(target_url):
+                async with session.get(target_url, headers=headers, timeout=12, allow_redirects=True, ssl=False) as response:
+                    final_url = str(response.url).lower()
+                    status = response.status
+                    html = ""
+                    # If it's a success or a WAF block, try to grab the HTML
+                    if status < 400 or status in [403, 406]:
+                        try:
+                            html = await response.text()
+                        except:
+                            pass
+                    return status, final_url, html
 
-                if response.status >= 400:
-                    lead["website_status"] = "Broken"
-                    lead["validation_notes"] = f"HTTP Error {response.status}"
-                    return lead
+            try:
+                # First attempt: Clean URL (no UTM params)
+                status, final_url, html = await fetch_url(clean_url)
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                # Second attempt: Fallback to the base domain (.com/) if the deep link timed out
+                if clean_url != base_url:
+                    status, final_url, html = await fetch_url(base_url)
+                else:
+                    raise
 
-                # Check for parked domains by reading HTML
-                html = await response.text()
-                soup = BeautifulSoup(html, "html.parser")
-                text_content = soup.get_text().lower()
-
-                if any(kw in text_content for kw in self.parked_keywords):
-                    lead["website_status"] = "Parked Domain"
-                    lead["validation_notes"] = "HTML content suggests a parked or under-construction domain."
-                    return lead
-
-                # If all checks pass, it's a real website
-                lead["website_status"] = "Real Website (FILTER OUT)"
-                lead["validation_notes"] = "Site appears functional and active."
+            # Check for redirects to social media
+            if any(domain in final_url for domain in self.social_domains):
+                lead["website_status"] = "Social-Only"
+                lead["validation_notes"] = f"Redirected to social profile: {final_url}"
                 return lead
+
+            # 403 Forbidden / 406 Not Acceptable means the site is active and has a WAF blocking our bot.
+            # We treat these as "Real Website" so they get filtered out, since we want broken/bad websites.
+            if status in [403, 406]:
+                lead["website_status"] = "Real Website (FILTER OUT)"
+                lead["validation_notes"] = f"Site is active but blocking bots (HTTP {status})."
+                return lead
+
+            if status >= 400:
+                lead["website_status"] = "Broken"
+                lead["validation_notes"] = f"HTTP Error {status}"
+                return lead
+
+            # Check for parked domains by reading HTML
+            soup = BeautifulSoup(html, "html.parser")
+            text_content = soup.get_text().lower()
+
+            if any(kw in text_content for kw in self.parked_keywords):
+                lead["website_status"] = "Parked Domain"
+                lead["validation_notes"] = "HTML content suggests a parked or under-construction domain."
+                return lead
+
+            # If all checks pass, it's a real website
+            lead["website_status"] = "Real Website (FILTER OUT)"
+            lead["validation_notes"] = "Site appears functional and active."
+            return lead
 
         except asyncio.TimeoutError:
             lead["website_status"] = "Broken"
