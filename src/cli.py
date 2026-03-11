@@ -10,10 +10,11 @@ from validator import Validator
 from scorer import Scorer
 from exporter import Exporter
 from enrichment import EnrichmentModule
+from deduplicator import Deduplicator
 
 import aiohttp
 
-async def run_scraper(query: str, max_results: int, output_file: str):
+async def run_scraper(query: str, max_results: int, output_file: str, skip_enrichment: bool = False):
     # 1. Load Environment Variables
     load_dotenv()
     api_key = os.getenv("GOOGLE_PLACES_API_KEY")
@@ -36,6 +37,18 @@ async def run_scraper(query: str, max_results: int, output_file: str):
     
     if not raw_leads:
         print("[!] No leads found. Exiting.")
+        return
+
+    # 3.5 Deduplication
+    deduplicator = Deduplicator(storage_file="seen_leads.json")
+    original_count = len(raw_leads)
+    raw_leads = deduplicator.filter_and_record_new_leads(raw_leads)
+    
+    if len(raw_leads) < original_count:
+        print(f"[*] Deduped {original_count - len(raw_leads)} leads that were already processed previously.")
+
+    if not raw_leads:
+        print("[!] All discovered leads have been previously processed. No new leads found. Exiting.")
         return
 
     # 4. Step 2 & 3: Validate Websites and Score
@@ -63,10 +76,15 @@ async def run_scraper(query: str, max_results: int, output_file: str):
         
     print(f"\n--- Phase 3: Scoring and Enriching ({len(target_leads)} refined leads) ---")
     
-    # We apply scoring and then synchronous enrichment (to prevent DuckDuckGo rate limiting)
-    for i, lead in enumerate(target_leads):
-        target_leads[i] = scorer.score_lead(lead)
-        target_leads[i] = enricher.enrich_lead(target_leads[i])
+    if skip_enrichment:
+        print("[*] Skipping Enrichment phase as requested.")
+        for i, lead in enumerate(target_leads):
+            target_leads[i] = scorer.score_lead(lead)
+    else:
+        # We apply scoring and then synchronous enrichment (to prevent DuckDuckGo rate limiting)
+        for i, lead in enumerate(target_leads):
+            target_leads[i] = scorer.score_lead(lead)
+            target_leads[i] = enricher.enrich_lead(target_leads[i])
         
     print("[*] Enrichment and Scoring complete.")
 
@@ -96,12 +114,17 @@ def main():
         default="leads_output.csv", 
         help="Output CSV filename (default: leads_output.csv)"
     )
+    parser.add_argument(
+        "--skip-enrichment",
+        action="store_true",
+        help="Skip the DuckDuckGo enrichment phase for faster execution."
+    )
 
     args = parser.parse_args()
 
     # Run the async core
     try:
-        asyncio.run(run_scraper(query=args.query, max_results=args.max_results, output_file=args.output))
+        asyncio.run(run_scraper(query=args.query, max_results=args.max_results, output_file=args.output, skip_enrichment=args.skip_enrichment))
     except KeyboardInterrupt:
         print("\n[!] Process interrupted by user.")
         sys.exit(0)

@@ -40,6 +40,7 @@ Run the CLI via terminal:
 - `-q` or `--query`: The search string for Google Places.
 - `-m` or `--max-results`: Maximum leads to fetch from Google (Default: 50).
 - `-o` or `--output`: The filename to dump the exported CSV results into.
+- `--skip-enrichment`: Optional flag to skip DuckDuckGo extraction for faster bulk processing.
 
 ## Project Architecture
 - `src/cli.py`: The command loop and progress UI.
