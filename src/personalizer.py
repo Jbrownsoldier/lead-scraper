@@ -1,52 +1,132 @@
 import os
 import random
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional
+import google.generativeai as genai
 
 class Personalizer:
     def __init__(self):
-        # We can add an AI client here later if needed
-        self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+            # 1.5 Flash is cost-effective and fast
+            # We enable the google_search tool for grounding
+            self.model = genai.GenerativeModel(
+                model_name="gemini-1.5-flash",
+                tools=[{"google_search": {}}]
+            )
+        else:
+            self.model = None
 
-    def generate_icebreaker(self, lead: Dict[str, Any]) -> str:
+    async def research_and_personalize(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generates a personalized icebreaker based on the lead's website status.
-        Uses a heuristic-based approach by default.
+        Uses Gemini to research the decision maker and write a personalized icebreaker.
         """
+        if not self.model:
+            # Fallback to templates if no API key
+            lead["icebreaker"] = self._generate_fallback_icebreaker(lead)
+            return lead
+
+        business_name = lead.get("business_name", "your team")
+        location = lead.get("location", "")
+        status = lead.get("website_status", "")
+        website = lead.get("website", "")
+        
+        # Phase 1: Research the Decision Maker
+        research_prompt = f"""
+        Research the owner, CEO, or lead decision maker for the business: "{business_name}" in {location}.
+        Website lookup: {website}
+        
+        Please find:
+        1. Full Name of the Owner/CEO.
+        2. Their LinkedIn profile URL if available.
+        3. Any specific mentions of their background or current focus.
+        
+        Search through Google and social media (LinkedIn, Twitter, Facebook) to be as accurate as possible.
+        """
+        
+        try:
+            # Research call
+            research_response = self.model.generate_content(research_prompt)
+            research_text = research_response.text
+            
+            # Phase 2: Generate the Icebreaker
+            # Extract clean company name from domain if possible
+            clean_company = business_name.lower().replace(" ", "")
+            if website:
+                domain = website.lower().replace("https://", "").replace("http://", "").replace("www.", "").split('/')[0]
+                if "." in domain:
+                    clean_company = domain.split('.')[0]
+
+            personalization_prompt = f"""
+            You are an expert cold outreach specialist.
+            
+            Context:
+            Business Name: {business_name}
+            Clean Company Name: {clean_company}
+            Website Status: {status}
+            Prospect Research:
+            {research_text}
+
+            Task 1 (Icebreaker):
+            Write a personalized icebreaker for a cold email using the research and company name. 
+            - Use company name: {clean_company}
+            - Style: Succinct, casual, informal, spartan tone.
+            - Relate back to the user (shared interest).
+            - End with: "figured i'd reach out" (or similar).
+            - ABSOLUTE RULE: NO DASH CHARACTERS EVER (-).
+
+            Task 2 (Personalized Content):
+            Write a short follow-up sentence responding to the {status} status.
+            - Explain why their current situation (broken/missing site) is a problem for {clean_company}.
+            - Mention: "I actually went ahead and built you a new one to show you what's possible."
+            - Style: Casual and helpful.
+            - ABSOLUTE RULE: NO DASH CHARACTERS EVER (-).
+
+            Response Format:
+            ICEBREAKER: [icebreaker text]
+            CONTENT: [personalized content text]
+            """
+            
+            # Personalization call
+            icebreaker_response = self.model.generate_content(personalization_prompt)
+            resp_text = icebreaker_response.text.replace('-', ' ').replace('—', ' ').replace('–', ' ')
+            
+            # Simple parsing
+            icebreaker = ""
+            content = ""
+            for line in resp_text.split('\n'):
+                if line.startswith("ICEBREAKER:"):
+                    icebreaker = line.replace("ICEBREAKER:", "").strip().replace('"', '')
+                if line.startswith("CONTENT:"):
+                    content = line.replace("CONTENT:", "").strip().replace('"', '')
+
+            lead["icebreaker"] = icebreaker
+            lead["personalizedemailcontent"] = content
+            
+            # Extract name if possible
+            if "," in lead["icebreaker"] and len(lead["icebreaker"].split(",")[0].split()) <= 3:
+                name_candidate = lead["icebreaker"].split(",")[0].replace("Hi", "").replace("hi", "").strip()
+                if name_candidate and len(name_candidate) < 20:
+                    lead["ceo_name"] = name_candidate
+
+        except Exception as e:
+            logging.error(f"Gemini Personalization Error: {e}")
+            lead["icebreaker"] = self._generate_fallback_icebreaker(lead)
+        
+        return lead
+
+    def _generate_fallback_icebreaker(self, lead: Dict[str, Any]) -> str:
+        """Original heuristic-based fallback"""
         business_name = lead.get("business_name", "your team")
         status = lead.get("website_status", "")
-        notes = lead.get("validation_notes", "").lower()
-        ceo = lead.get("ceo_name", "")
-
-        name_part = f"Hi {ceo.split()[0]}, " if ceo else "Hi there, "
+        name_part = "Hi there, "
         
-        # 1. No Website
         if status == "No Website":
-            options = [
-                f"{name_part}I noticed {business_name} doesn't have a website listed on Google yet. Are you currently taking all your bookings manually?",
-                f"{name_part}I was looking for {business_name} online and couldn't find a dedicated site. Is that something you're looking to build this year?",
-                f"{name_part}Quick question: Is {business_name} primarily focused on word-of-mouth right now, or have you just not gotten around to the website yet?"
-            ]
-            return random.choice(options)
-
-        # 2. Social-Only
+            return f"{name_part}I noticed {business_name} doesn't have a website listed on Google yet. Are you currently taking all your bookings manually?"
         if status == "Social-Only":
-            options = [
-                f"{name_part}I saw {business_name} is currently using social media as your main 'hub.' Have you considered how much more trust a professional domain would add?",
-                f"{name_part}Love the work you guys are doing on social! I noticed you don't have a standalone site for {business_name} yet—any plans for that?",
-                f"{name_part}I found your profile while searching for local pros. Do you find that just using social media captures enough of the Dallas market for {business_name}?"
-            ]
-            return random.choice(options)
-
-        # 3. Broken Website
+            return f"{name_part}Love the work you guys are doing on social! I noticed you don't have a standalone site for {business_name} yet—any plans for that?"
         if status == "Broken":
-            if "timeout" in notes or "connection" in notes:
-                return f"{name_part}I tried visiting the {business_name} site but it seems to be having some server connection issues today. Just wanted to give you a heads up!"
-            if "404" in notes:
-                return f"{name_part}I noticed the link to {business_name} on Google is currently leading to a 404 error page. Might be costing you some leads!"
             return f"{name_part}I noticed the website for {business_name} seems to be down or inactive at the moment. Are you currently doing an update?"
-
-        # 4. Parked Domain
-        if status == "Parked Domain":
-            return f"{name_part}I saw that the {business_name} domain is currently parked. Are you planning on launching the full site soon, or is that a project for later?"
-
-        return f"{name_part}I was checking out {business_name} and wanted to reach out regarding your current digital presence in the local market."
+        
+        return f"{name_part}I was checking out {business_name} and wanted to reach out regarding your current digital presence."
