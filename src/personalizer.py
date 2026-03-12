@@ -13,7 +13,7 @@ class Personalizer:
             # We enable the google_search tool for grounding
             self.model = genai.GenerativeModel(
                 model_name="gemini-1.5-flash",
-                tools=[{"google_search": {}}]
+                tools=[{"google_search_retrieval": {}}]
             )
         else:
             self.model = None
@@ -40,7 +40,8 @@ class Personalizer:
         Please find:
         1. Full Name of the Owner/CEO.
         2. Their LinkedIn profile URL if available.
-        3. Any specific mentions of their background or current focus.
+        3. A direct business or owner email address if publicly listed.
+        4. Any specific mentions of their background or current focus.
         
         Search through Google and social media (LinkedIn, Twitter, Facebook) to be as accurate as possible.
         """
@@ -50,6 +51,12 @@ class Personalizer:
             research_response = self.model.generate_content(research_prompt)
             research_text = research_response.text
             
+            # Extract email from research if present and not already found
+            if not lead.get("emails"):
+                found_emails = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', research_text)
+                if found_emails:
+                    lead["emails"] = ", ".join(list(set(e.lower() for e in found_emails)))
+
             # Phase 2: Generate the Icebreaker
             # Extract clean company name from domain if possible
             clean_company = business_name.lower().replace(" ", "")
@@ -112,7 +119,8 @@ class Personalizer:
 
         except Exception as e:
             logging.error(f"Gemini Personalization Error: {e}")
-            lead["icebreaker"] = self._generate_fallback_icebreaker(lead)
+            if not lead.get("icebreaker"):
+                lead["icebreaker"] = self._generate_fallback_icebreaker(lead)
         
         return lead
 
