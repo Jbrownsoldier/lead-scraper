@@ -136,5 +136,7 @@ class Personalizer:
             return f"{name_part}Love the work you guys are doing on social! I noticed you don't have a standalone site for {business_name} yet—any plans for that?"
         if status == "Broken":
             return f"{name_part}I noticed the website for {business_name} seems to be down or inactive at the moment. Are you currently doing an update?"
+        if status == "Redesign Opportunity":
+            return f"{name_part}I was checking out the site for {business_name} and noticed it could use a few updates like mobile optimization and SSL. Are you guys planning on a redesign soon?"
         
         return f"{name_part}I was checking out {business_name} and wanted to reach out regarding your current digital presence."

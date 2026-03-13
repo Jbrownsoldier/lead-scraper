@@ -31,6 +31,8 @@ class Scorer:
             score += 2 # Good target, but might just be squatting
         elif web_status == "Broken":
             score += 1 # Okay target, but could indicate business closure
+        elif web_status == "Redesign Opportunity":
+            score += 3 # Prime target (site exists but is poor)
             
         # Assign High/Medium/Low based on accumulated score
         has_enrichment = bool(lead.get("emails") or lead.get("ceo_name"))

@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+import time
 from bs4 import BeautifulSoup
 from typing import Dict, Any
 
@@ -44,6 +45,17 @@ class Validator:
             "twitter.com",
             "x.com",
             "yelp.com"
+        ]
+
+        # Redesign Audit Configuration
+        self.cta_keywords = [
+            "contact", "book", "schedule", "quote", "estimate", "appointment",
+            "get started", "call us", "message", "inquiry", "reserve"
+        ]
+        
+        self.old_tech_keywords = [
+            "<frameset", "<frame ", "<font ", "cellspacing=", "cellpadding=",
+            "align=\"center\"", "background=\"", "bgcolor=\""
         ]
 
     async def validate_website(self, lead: Dict[str, Any], session: aiohttp.ClientSession) -> Dict[str, Any]:
@@ -104,6 +116,7 @@ class Validator:
                             raise
                         await asyncio.sleep(2)
 
+            start_time = time.perf_counter()
             try:
                 # First attempt: Clean URL (no UTM params)
                 status, final_url, html = await fetch_url(clean_url)
@@ -113,6 +126,7 @@ class Validator:
                     status, final_url, html = await fetch_url(base_url)
                 else:
                     raise
+            fetch_duration = time.perf_counter() - start_time
 
             # Check for redirects to social media
             if any(domain in final_url for domain in self.social_domains):
@@ -159,9 +173,15 @@ class Validator:
                  lead["validation_notes"] = "Website contains almost no HTML text content, indicating an empty page."
                  return lead
 
-            # If all checks pass, it's a real website
-            lead["website_status"] = "Real Website (FILTER OUT)"
-            lead["validation_notes"] = "Site appears functional and active."
+            # If all checks pass, run a Redesign Audit
+            audit_results = self._audit_website(html, fetch_duration, final_url, soup)
+            
+            if audit_results:
+                lead["website_status"] = "Redesign Opportunity"
+                lead["validation_notes"] = f"Site is functional but has issues: {', '.join(audit_results)}"
+            else:
+                lead["website_status"] = "Real Website (FILTER OUT)"
+                lead["validation_notes"] = "Site appears functional and active."
             return lead
 
         except asyncio.TimeoutError:
@@ -188,6 +208,62 @@ class Validator:
             lead["validation_notes"] = f"Unexpected Error: {type(e).__name__}"
             return lead
 
+    def _audit_website(self, html: str, fetch_duration: float, final_url: str, soup: BeautifulSoup) -> list:
+        """
+        Runs a series of checks to determine if the website is a 'Redesign Opportunity'.
+        Returns a list of identified issues.
+        """
+        issues = []
+        
+        # 1. Missing SSL
+        if not final_url.startswith("https://"):
+            issues.append("Missing SSL (Insecure)")
+
+        # 2. No Clear CTA
+        # Check buttons, links, and inputs for CTA keywords
+        found_cta = False
+        cta_elements = soup.find_all(['a', 'button', 'input'])
+        for el in cta_elements:
+            text = (el.get_text() or el.get('value', '') or '').lower()
+            if any(kw in text for kw in self.cta_keywords):
+                found_cta = True
+                break
+        if not found_cta:
+            issues.append("No clear Call-to-Action (CTA)")
+
+        # 3. No Contact/Booking Form
+        if not soup.find('form'):
+            issues.append("No contact/booking form found")
+
+        # 4. No Mobile Viewport
+        if not soup.find('meta', attrs={"name": "viewport"}):
+            issues.append("Missing mobile viewport tag (Not Mobile Optimized)")
+
+        # 5. Thin Homepage Copy
+        text_content = soup.get_text(separator=' ')
+        word_count = len(text_content.split())
+        if word_count < 150:
+            issues.append(f"Thin content ({word_count} words)")
+
+        # 6. Old-looking Templates / Tech
+        html_lower = html.lower()
+        if any(kw in html_lower for kw in self.old_tech_keywords):
+            issues.append("Old design signals (table-based layout or archaic tags)")
+
+        # 7. Missing SEO signals
+        if not soup.find('title'):
+            issues.append("Missing Page Title")
+        
+        desc = soup.find('meta', attrs={"name": "description"})
+        if not desc or not desc.get('content', '').strip():
+            issues.append("Missing Meta Description")
+
+        # 8. Performance Signals
+        if fetch_duration > 2.5:
+             issues.append(f"Slow response time ({fetch_duration:.1f}s)")
+
+        return issues
+
 # Quick test execution block
 if __name__ == "__main__":
     async def test():
@@ -197,7 +273,8 @@ if __name__ == "__main__":
                 {"business_name": "No Site LLC", "website": None},
                 {"business_name": "Facebook Plumber", "website": "https://facebook.com/myplumbingbiz"},
                 {"business_name": "Broken Site Inc", "website": "https://this-site-definitely-does-not-exist-123.com"},
-                {"business_name": "Google", "website": "https://google.com"}
+                {"business_name": "Google", "website": "https://google.com"},
+                {"business_name": "Example Domain", "website": "http://example.com"} # Missing SSL, likely thin content
             ]
             
             tasks = [validator.validate_website(lead, session) for lead in test_leads]
