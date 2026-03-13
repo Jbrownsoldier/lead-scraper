@@ -21,19 +21,18 @@ class Exporter:
             
             # Reorder columns for better readability if they exist
             expected_columns = [
+                "person_name",
+                "email",
                 "business_name", 
-                "ceo_name",
-                "emails",
                 "icebreaker",
-                "personalizedemailcontent",
-                "confidence_score",
+                "email_body",
                 "website_status",
                 "phone", 
                 "address", 
                 "website", 
-                "social_links",
-                "maps_status",
-                "validation_notes"
+                "confidence_score",
+                "validation_notes",
+                "maps_status"
             ]
             
             cols = [col for col in expected_columns if col in df.columns]

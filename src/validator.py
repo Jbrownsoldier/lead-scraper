@@ -177,11 +177,13 @@ class Validator:
             audit_results = self._audit_website(html, fetch_duration, final_url, soup)
             
             if audit_results:
-                lead["website_status"] = "Redesign Opportunity"
+                lead["website_status"] = "Optimization Opportunity"
                 lead["validation_notes"] = f"Site is functional but has issues: {', '.join(audit_results)}"
+                lead["audit_issues"] = audit_results
             else:
-                lead["website_status"] = "Real Website (FILTER OUT)"
-                lead["validation_notes"] = "Site appears functional and active."
+                lead["website_status"] = "Polished Website"
+                lead["validation_notes"] = "Site appears high-quality, but could be pitched for maintenance, SEO, or conversion optimization."
+                lead["audit_issues"] = ["General maintenance", "SEO enhancement"]
             return lead
 
         except asyncio.TimeoutError:

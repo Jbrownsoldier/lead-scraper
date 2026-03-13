@@ -35,7 +35,8 @@ class Scorer:
             score += 3 # Prime target (site exists but is poor)
             
         # Assign High/Medium/Low based on accumulated score
-        has_enrichment = bool(lead.get("emails") or lead.get("ceo_name"))
+        # Enrichment check now focuses primarily on emails
+        has_enrichment = bool(lead.get("emails"))
         
         if score >= 8 and has_enrichment:
             lead["confidence_score"] = "High"

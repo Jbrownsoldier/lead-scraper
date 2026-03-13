@@ -23,13 +23,10 @@ async def push_to_instantly(leads: list, api_key: str):
         if not email or pd.isna(email):
             continue
 
-        ceo_name = lead.get("ceo_name", "")
-        if pd.isna(ceo_name): ceo_name = ""
-
         formatted_leads.append({
             "email": email,
-            "first_name": str(ceo_name).split()[0] if ceo_name else "there",
-            "last_name": str(ceo_name).split()[-1] if ceo_name and len(str(ceo_name).split()) > 1 else "",
+            "first_name": "there",
+            "last_name": "",
             "company_name": lead.get("business_name", ""),
             "website": lead.get("website", ""),
             "custom_variables": {
